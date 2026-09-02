@@ -1,3 +1,5 @@
+@import "../public/css/adminlte.css";
+@import "bootstrap-icons/font/bootstrap-icons.css";
 @import "tailwindcss";
 
 :root {
