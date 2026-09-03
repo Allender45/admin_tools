@@ -1,0 +1,134 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Department {
+  id    Int    @id @default(autoincrement())
+  name  String @unique @db.VarChar(255)
+  floor Int?
+  room  Int?
+
+  users User[]
+
+  locationId Int?      @map("location_id")
+  location   Location? @relation(fields: [locationId], references: [id])
+
+  workplaces Workplace[]
+  requests   Requests[]
+
+  @@map("departments")
+}
+
+model Location {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(255)
+
+  department Department[]
+
+  @@map("locations")
+}
+
+model Position {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(255)
+
+  users User[]
+
+  @@map("positions")
+}
+
+model Workplace {
+  id         Int     @id @default(autoincrement())
+  number     String  @unique @db.VarChar(20)
+  processor  String? @db.VarChar(150)
+  ram        String? @db.VarChar(50)
+  storage    String? @db.VarChar(150)
+  monitor    String? @map("monitor") @db.VarChar(100)
+  monitor2   String? @map("monitor2") @db.VarChar(100)
+  keyboard   String? @map("keyboard") @db.VarChar(100)
+  mouse      String? @map("mouse") @db.VarChar(100)
+  headphones String? @map("headphones") @db.VarChar(100)
+  ipAddress  String? @map("ip_address") @db.VarChar(15)
+  comments   String?
+
+  departmentId Int?        @map("location_id")
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  pcTypeId Int?    @map("pc_type_id")
+  pcType   PcType? @relation(fields: [pcTypeId], references: [id])
+
+  users    User[]
+  requests Requests[]
+
+  @@map("workplaces")
+}
+
+model User {
+  id         Int      @id @default(autoincrement())
+  lastName   String   @map("last_name") @db.VarChar(100)
+  firstName  String   @map("first_name") @db.VarChar(100)
+  middleName String?  @map("middle_name") @db.VarChar(100)
+  photo      String?
+  phone      String?  @db.VarChar(30)
+  isActive   Boolean  @default(true) @map("is_active")
+  skudPass   String?  @map("skud_pass") @db.VarChar(100)
+  comments   String?
+  crmId      Int?     @map("crm_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  departmentId Int?        @map("department_id")
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  positionId Int?      @map("position_id")
+  position   Position? @relation(fields: [positionId], references: [id])
+
+  workplaceId Int?       @map("workplace_id")
+  workplace   Workplace? @relation(fields: [workplaceId], references: [id])
+  requests    Requests[]
+
+  @@map("users")
+}
+
+model Admin {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique @db.VarChar(100)
+  passwordHash String   @map("password_hash")
+  displayName  String?  @map("display_name") @db.VarChar(200)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("admins")
+}
+
+model PcType {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(20)
+
+  workplaces Workplace[]
+
+  @@map("pc_types")
+}
+
+model Requests {
+  id           Int         @id @default(autoincrement())
+  authorId     Int         @map("user_id")
+  author       User        @relation(fields: [authorId], references: [id])
+  workplaceId  Int         @map("workplace_id")
+  workplace    Workplace   @relation(fields: [workplaceId], references: [id])
+  description  String
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  status       Boolean     @default(true)
+  contactPhone String      @db.VarChar(30)
+  comments     String?
+  departmentId Int?        @map("department_id")
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  @@map("requests")
+}
