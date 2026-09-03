@@ -116,19 +116,20 @@ model PcType {
 }
 
 model Requests {
-  id           Int         @id @default(autoincrement())
-  authorId     Int         @map("user_id")
-  author       User        @relation(fields: [authorId], references: [id])
-  workplaceId  Int         @map("workplace_id")
-  workplace    Workplace   @relation(fields: [workplaceId], references: [id])
-  description  String
-  createdAt    DateTime    @default(now()) @map("created_at")
-  updatedAt    DateTime    @updatedAt @map("updated_at")
-  status       Boolean     @default(true)
-  contactPhone String      @db.VarChar(30)
-  comments     String?
-  departmentId Int?        @map("department_id")
-  department   Department? @relation(fields: [departmentId], references: [id])
+  id              Int         @id @default(autoincrement())
+  authorId        Int         @map("user_id")
+  author          User        @relation(fields: [authorId], references: [id])
+  workplaceId     Int?        @map("workplace_id")
+  workplace       Workplace?  @relation(fields: [workplaceId], references: [id])
+  workplaceNumber String      @map("workplace_number") @db.VarChar(50)
+  description     String
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  status          Boolean     @default(true)
+  contactPhone    String      @db.VarChar(30)
+  comments        String?
+  departmentId    Int?        @map("department_id")
+  department      Department? @relation(fields: [departmentId], references: [id])
 
   @@map("requests")
 }

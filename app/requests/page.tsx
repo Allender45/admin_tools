@@ -22,7 +22,7 @@ export default function RequestsPage() {
         ...r,
         authorName: [r.author.lastName, r.author.firstName, r.author.middleName].filter(Boolean).join(' '),
         departmentName: r.department?.name ?? '—',
-        workplaceNumber: r.workplace?.number ?? '—',
+        workplaceNumber: r.workplace?.number ?? r.workplaceNumber,
         createdAtFormatted: new Date(r.createdAt).toLocaleString('ru'),
     })), [requests])
 
@@ -65,7 +65,7 @@ export default function RequestsPage() {
         },
         {
             key: 'workplaceNumber', title: 'Рабочее место', width: '140px', sortable: true,
-            render: (v, row) => (
+            render: (v, row) => row.workplace ? (
                 <button type="button" className="btn btn-link p-0 text-decoration-none"
                         onClick={(e) => {
                             e.stopPropagation()
@@ -73,6 +73,8 @@ export default function RequestsPage() {
                         }}>
                     {String(v)}
                 </button>
+            ) : (
+                <span>{String(v)}</span>
             ),
         },
         {

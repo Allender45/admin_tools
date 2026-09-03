@@ -4,7 +4,7 @@ import type { Requests, User, Department, Workplace } from '@prisma/client'
 export type RequestWithRelations = Requests & {
     author: User
     department: Department | null
-    workplace: Workplace
+    workplace: Workplace | null
 }
 
 type RequestsStore = {

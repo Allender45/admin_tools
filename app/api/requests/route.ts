@@ -38,12 +38,6 @@ export async function POST(req: NextRequest) {
         const workplace = await prisma.workplace.findUnique({
             where: { number: String(workplaceNumber).trim() },
         })
-        if (!workplace) {
-            return NextResponse.json(
-                { error: `Рабочее место "${workplaceNumber}" не найдено` },
-                { status: 404 }
-            )
-        }
 
         const normalizedPhone = normalizePhone(String(phone))
         const trimmedLastName = String(lastName).trim()
@@ -88,7 +82,8 @@ export async function POST(req: NextRequest) {
         const request = await prisma.requests.create({
             data: {
                 authorId: author.id,
-                workplaceId: workplace.id,
+                workplaceId: workplace?.id,
+                workplaceNumber: String(workplaceNumber).trim(),
                 description: String(description).trim(),
                 contactPhone: normalizePhone(String(contactPhone)),
                 departmentId: author.departmentId,

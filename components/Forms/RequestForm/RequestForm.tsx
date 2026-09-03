@@ -50,7 +50,8 @@ export default function RequestForm({ initialData, onSuccess, onCancel }: Reques
                     </div>
                     <div className="col-md-6">
                         <label className="form-label">Рабочее место</label>
-                        <input type="text" className="form-control" value={initialData.workplace.number} disabled />
+                        <input type="text" className="form-control"
+                               value={initialData.workplace?.number ?? initialData.workplaceNumber} disabled />
                     </div>
                 </div>
 
