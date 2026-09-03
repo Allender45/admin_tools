@@ -1,5 +1,5 @@
 -- DropForeignKey
-ALTER TABLE "requests" DROP CONSTRAINT "requests_workplace_id_fkey";
+ALTER TABLE "requests" DROP CONSTRAINT IF EXISTS "requests_workplace_id_fkey";
 
 -- AlterTable
 ALTER TABLE "requests" ALTER COLUMN "workplace_id" DROP NOT NULL;
