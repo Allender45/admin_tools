@@ -1,15 +1,19 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { Sidebar, Navbar } from '@/components'
 import Script from 'next/script'
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
     const [adminName, setAdminName] = useState('Администратор')
     const router = useRouter()
+    const pathname = usePathname()
+    const isLoginPage = pathname.startsWith('/login')
 
     useEffect(() => {
+        if (isLoginPage) return
+
         fetch('/api/auth/me')
             .then(res => {
                 if (res.status === 401) { router.push('/login'); return null }
@@ -20,7 +24,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     setAdminName(data.admin.displayName ?? data.admin.username)
                 }
             })
-    }, [])
+    }, [isLoginPage])
+
+    if (isLoginPage) {
+        return <>{children}</>
+    }
 
     return (
         <div className="app-wrapper">

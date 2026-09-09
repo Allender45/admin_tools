@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import "./globals.css"
+import { AdminLayout } from '@/components'
 
 export const metadata: Metadata = {
     title: "Admin Tools",
@@ -22,7 +23,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <head>
             <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         </head>
-        <body className="sidebar-expand-sm" suppressHydrationWarning>{children}</body>
+        <body className="sidebar-expand-sm" suppressHydrationWarning>
+        <AdminLayout>{children}</AdminLayout>
+        </body>
         </html>
     )
 }

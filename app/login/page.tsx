@@ -9,8 +9,9 @@ export default function LoginPage() {
     const [loading, setLoading] = useState(false)
 
     useEffect(() => {
+        const prevClassName = document.body.className
         document.body.className = 'login-page bg-body-secondary'
-        return () => { document.body.className = '' }
+        return () => { document.body.className = prevClassName }
     }, [])
 
     async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {

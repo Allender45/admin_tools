@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { DataTable, UserForm, WorkplaceForm, RequestForm, AdminLayout } from '@/components'
+import { DataTable, UserForm, WorkplaceForm, RequestForm } from '@/components'
 import type { DataTableColumn } from '@/components'
 import { useRequestsStore } from '@/store'
 import type { RequestWithRelations } from '@/store'
@@ -100,7 +100,7 @@ export default function RequestsPage() {
     }
 
     return (
-        <AdminLayout>
+        <>
             {loading
                 ? <div className="text-center text-muted py-4">Загрузка...</div>
                 : <DataTable
@@ -134,6 +134,6 @@ export default function RequestsPage() {
                                  onSuccess={handleSaved} onCancel={() => setSelectedRequest(null)} />
                 )}
             </Modal>
-        </AdminLayout>
+        </>
     )
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { DataTable, UserForm, AdminLayout } from '@/components'
+import { DataTable, UserForm } from '@/components'
 import type { DataTableColumn } from '@/components'
 import { useUsersStore, useDepartmentsStore, usePositionsStore, useWorkplacesStore } from '@/store'
 import { Modal } from '@/containers'
@@ -101,7 +101,7 @@ export default function UsersPage() {
     })), [users, departmentNames, positionNames, workplaceNumbers])
 
     return (
-        <AdminLayout>
+        <>
             {loading
                 ? <div className="text-center text-muted py-4">Загрузка...</div>
                 : <DataTable
@@ -120,6 +120,6 @@ export default function UsersPage() {
                 <UserForm key={selected?.id ?? 'new'} initialData={selected}
                           onSuccess={handleSaved} onCancel={handleClose} />
             </Modal>
-        </AdminLayout>
+        </>
     )
 }

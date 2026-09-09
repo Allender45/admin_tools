@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import AdminLayout from '@/components/AdminLayout/AdminLayout'
 import { DataTable, WorkplaceForm } from '@/components'
 import type { DataTableColumn } from '@/components'
 import { Modal } from '@/containers'
@@ -35,7 +34,7 @@ export default function WorkplacesPage() {
     }
 
     return (
-        <AdminLayout>
+        <>
             {loading
                 ? <div className="text-center text-muted py-4">Загрузка...</div>
                 : <DataTable
@@ -53,6 +52,6 @@ export default function WorkplacesPage() {
                 <WorkplaceForm key={selected?.id ?? 'new'} initialData={selected}
                                onSuccess={handleSaved} onCancel={handleClose} />
             </Modal>
-        </AdminLayout>
+        </>
     )
 }

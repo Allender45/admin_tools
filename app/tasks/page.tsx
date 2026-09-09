@@ -1,7 +1,7 @@
 'use client'
 
 import {useEffect, useState} from 'react'
-import {AdminLayout, ShortTable, AdminForm, DepartmentForm, PositionForm, PcTypeForm} from '@/components'
+import {ShortTable, AdminForm, DepartmentForm, PositionForm, PcTypeForm} from '@/components'
 import {Modal} from '@/containers'
 import {useAdminsStore, useDepartmentsStore, usePositionsStore, Admin, usePcTypesStore} from '@/store'
 import type { Department, PcType, Position  } from '@prisma/client'
@@ -67,9 +67,9 @@ export default function SettingsPage() {
 
     if (adminsLoading || departmentsLoading || positionsLoading) {
         return (
-            <AdminLayout>
+            <>
                 <div className="text-center text-muted py-4">Загрузка...</div>
-            </AdminLayout>
+            </>
         )
     }
 
@@ -134,7 +134,7 @@ export default function SettingsPage() {
     }
 
     return (
-        <AdminLayout>
+        <>
             <ShortTable
                 rows={adminsRows}
                 columns={[
@@ -223,6 +223,6 @@ export default function SettingsPage() {
                     <PcTypeForm pcType={editingPcType} onSuccess={handlePcTypeEdited} onCancel={() => setEditingPcType(null)} />
                 )}
             </Modal>
-        </AdminLayout>
+        </>
     )
 }
