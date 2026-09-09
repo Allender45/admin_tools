@@ -23,7 +23,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }, [])
 
     return (
-        <div className="app-wrapper sidebar-expand-sm">
+        <div className="app-wrapper">
             <Navbar adminName={adminName} />
             <Sidebar />
             <main className="app-main">
