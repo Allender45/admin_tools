@@ -16,6 +16,7 @@ export default function UserForm({ initialData, onSuccess, onCancel }: UserFormP
     const { departments, fetchDepartments } = useDepartmentsStore()
     const { positions, fetchPositions } = usePositionsStore()
     const { workplaces, fetchWorkplaces } = useWorkplacesStore()
+    const [dictsLoading, setDictsLoading] = useState(true)
     const [photoFile, setPhotoFile] = useState<File | null>(null)
     const [photoPreview, setPhotoPreview] = useState<string | null>(initialData?.photo ?? null)
     const [phoneDigits, setPhoneDigits] = useState(() =>
@@ -24,10 +25,18 @@ export default function UserForm({ initialData, onSuccess, onCancel }: UserFormP
     const [deleting, setDeleting] = useState(false)
 
     useEffect(() => {
-        fetchDepartments()
-        fetchPositions()
-        fetchWorkplaces()
+        Promise.all([fetchDepartments(), fetchPositions(), fetchWorkplaces()]).finally(() => setDictsLoading(false))
     }, [])
+
+    if (dictsLoading) {
+        return (
+            <div className="modal-body text-center py-5">
+                <div className="spinner-border text-primary" role="status">
+                    <span className="visually-hidden">Загрузка...</span>
+                </div>
+            </div>
+        )
+    }
 
     function formatPhone(digits: string): string {
         if (!digits) return ''

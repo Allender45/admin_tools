@@ -13,13 +13,23 @@ interface WorkplaceFormProps {
 export default function WorkplaceForm({ initialData, onSuccess, onCancel }: WorkplaceFormProps) {
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
-    const { departments, fetchDepartments } = useDepartmentsStore()
-    const { pcTypes, fetchPcTypes } = usePcTypesStore()
+    const { departments, fetchDepartments, loading: departmentsLoading } = useDepartmentsStore()
+    const { pcTypes, fetchPcTypes, loading: pcTypesLoading } = usePcTypesStore()
+    const [dictsLoading, setDictsLoading] = useState(true)
 
     useEffect(() => {
-        fetchDepartments()
-        fetchPcTypes()
+        Promise.all([fetchDepartments(), fetchPcTypes()]).finally(() => setDictsLoading(false))
     }, [])
+
+    if (dictsLoading) {
+        return (
+            <div className="modal-body text-center py-5">
+                <div className="spinner-border text-primary" role="status">
+                    <span className="visually-hidden">Загрузка...</span>
+                </div>
+            </div>
+        )
+    }
 
     async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault()

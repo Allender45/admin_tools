@@ -61,14 +61,17 @@ export default function SettingsPage() {
         fetchPcTypes()
     }
 
-    useEffect(
-        () => {
-            fetchAdmins()
-            fetchDepartments()
-            fetchPositions()
-            fetchPcTypes()
-        },
-        [])
+    useEffect(() => {
+        Promise.all([fetchAdmins(), fetchDepartments(), fetchPositions(), fetchPcTypes()])
+    }, [])
+
+    if (adminsLoading || departmentsLoading || positionsLoading) {
+        return (
+            <AdminLayout>
+                <div className="text-center text-muted py-4">Загрузка...</div>
+            </AdminLayout>
+        )
+    }
 
     function handleAdminCreated() {
         setAdminModalOpen(false)
