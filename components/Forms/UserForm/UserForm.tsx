@@ -23,6 +23,7 @@ export default function UserForm({ initialData, onSuccess, onCancel }: UserFormP
         (initialData?.phone ?? '').replace(/\D/g, '').replace(/^[78]/, '').slice(0, 10)
     )
     const [deleting, setDeleting] = useState(false)
+    const [adCredentials, setAdCredentials] = useState<{ login: string; tempPassword: string } | null>(null)
 
     useEffect(() => {
         Promise.all([fetchDepartments(), fetchPositions(), fetchWorkplaces()]).finally(() => setDictsLoading(false))
@@ -84,6 +85,13 @@ export default function UserForm({ initialData, onSuccess, onCancel }: UserFormP
 
         if (!res.ok) { setError(data.error); return }
 
+        // Создание: если вернулись данные AD — показываем пароль один раз,
+        // модалку пока НЕ закрываем
+        if (!initialData && data.ad) {
+            setAdCredentials(data.ad)
+            return
+        }
+
         onSuccess()
     }
 
@@ -105,6 +113,31 @@ export default function UserForm({ initialData, onSuccess, onCancel }: UserFormP
         const file = e.target.files?.[0] ?? null
         setPhotoFile(file)
         setPhotoPreview(file ? URL.createObjectURL(file) : null)
+    }
+
+    if (adCredentials) {
+        return (
+            <>
+                <div className="modal-body">
+                    <div className="alert alert-success">
+                        <h6 className="alert-heading">Сотрудник создан</h6>
+                        <p className="mb-1">Учётная запись в домене:</p>
+                        <p className="mb-1">Логин: <strong>{adCredentials.login}</strong></p>
+                        <p className="mb-2">
+                            Временный пароль: <strong className="font-monospace">{adCredentials.tempPassword}</strong>
+                        </p>
+                        <hr />
+                        <small className="mb-0">
+                            Пароль показывается один раз и больше нигде не сохраняется — запишите его.
+                            При первом входе сотрудник будет должен задать свой пароль.
+                        </small>
+                    </div>
+                </div>
+                <div className="modal-footer">
+                    <button type="button" className="btn btn-primary" onClick={onSuccess}>Готово</button>
+                </div>
+            </>
+        )
     }
 
     return (
@@ -178,6 +211,18 @@ export default function UserForm({ initialData, onSuccess, onCancel }: UserFormP
                         <input name={'crmId'} type="text" className="form-control"
                                defaultValue={(initialData?.['crmId'] as string | number | null) ?? ''} />
                     </div>
+                </div>
+
+                <div className="row g-3 mb-2">
+                    {initialData?.adLogin && (
+                        <div className="row g-3 mb-2">
+                            <div className="col-md-4">
+                                <label className="form-label">Логин AD</label>
+                                <input type="text" className="form-control font-monospace"
+                                       value={initialData.adLogin} disabled readOnly />
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <div className="mb-2">

@@ -75,6 +75,7 @@ export default function UsersPage() {
         { key: 'workplace', title: 'Рабочее место', width: '140px', sortable: true },
         { key: 'skudPass', title: 'Пропуск СКУД', width: '140px', filterable: true },
         { key: 'crmId', title: 'CRM ID', width: '90px', sortable: true },
+        { key: 'adLogin', title: 'Логин AD', width: '140px', filterable: true },
         { key: 'comments', title: 'Комментарии' },
         {
             key: 'isActive', title: 'Статус', width: '110px',
@@ -109,7 +110,7 @@ export default function UsersPage() {
                     data={tableData}
                     title="Сотрудники"
                     exportFilename="users"
-                    defaultHiddenCols={['photo', 'skudPass', 'crmId', 'comments', 'createdAt', 'department', 'isActive', 'position', 'id']}
+                    defaultHiddenCols={['photo', 'skudPass', 'crmId', 'comments', 'createdAt', 'department', 'isActive', 'position', 'adLogin', 'id']}
                     onAdd={() => { setSelected(null); setModalOpen(true) }}
                     onRowClick={(row) => { setSelected(row as unknown as User); setModalOpen(true) }}
                 />
