@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useDepartmentsStore, usePositionsStore, useWorkplacesStore } from '@/store'
-import type { User } from '@prisma/client'
+import {useEffect, useState} from 'react'
+import {useDepartmentsStore, usePositionsStore, useWorkplacesStore} from '@/store'
+import type {User} from '@prisma/client'
+import {Modal} from '@/containers'
 
 interface UserFormProps {
     initialData?: User | null
@@ -10,12 +11,12 @@ interface UserFormProps {
     onCancel: () => void
 }
 
-export default function UserForm({ initialData, onSuccess, onCancel }: UserFormProps) {
+export default function UserForm({initialData, onSuccess, onCancel}: UserFormProps) {
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
-    const { departments, fetchDepartments } = useDepartmentsStore()
-    const { positions, fetchPositions } = usePositionsStore()
-    const { workplaces, fetchWorkplaces } = useWorkplacesStore()
+    const {departments, fetchDepartments} = useDepartmentsStore()
+    const {positions, fetchPositions} = usePositionsStore()
+    const {workplaces, fetchWorkplaces} = useWorkplacesStore()
     const [dictsLoading, setDictsLoading] = useState(true)
     const [photoFile, setPhotoFile] = useState<File | null>(null)
     const [photoPreview, setPhotoPreview] = useState<string | null>(initialData?.photo ?? null)
@@ -24,6 +25,7 @@ export default function UserForm({ initialData, onSuccess, onCancel }: UserFormP
     )
     const [deleting, setDeleting] = useState(false)
     const [adCredentials, setAdCredentials] = useState<{ login: string; tempPassword: string } | null>(null)
+    const [pwdOpen, setPwdOpen] = useState(false)
 
     useEffect(() => {
         Promise.all([fetchDepartments(), fetchPositions(), fetchWorkplaces()]).finally(() => setDictsLoading(false))
@@ -59,31 +61,38 @@ export default function UserForm({ initialData, onSuccess, onCancel }: UserFormP
         if (photoFile) {
             const fd = new FormData()
             fd.append('file', photoFile)
-            const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd })
+            const uploadRes = await fetch('/api/upload', {method: 'POST', body: fd})
             const uploadData = await uploadRes.json()
-            if (!uploadRes.ok) { setError(uploadData.error); setLoading(false); return }
+            if (!uploadRes.ok) {
+                setError(uploadData.error);
+                setLoading(false);
+                return
+            }
             photo = uploadData.url
         }
 
         const form = new FormData(formEl)
-        const body = { ...Object.fromEntries(form.entries()), photo }
+        const body = {...Object.fromEntries(form.entries()), photo}
 
         const res = initialData
             ? await fetch(`/api/users/${initialData.id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(body),
             })
             : await fetch('/api/users', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(body),
             })
 
         const data = await res.json()
         setLoading(false)
 
-        if (!res.ok) { setError(data.error); return }
+        if (!res.ok) {
+            setError(data.error);
+            return
+        }
 
         // Создание: если вернулись данные AD — показываем пароль один раз,
         // модалку пока НЕ закрываем
@@ -100,11 +109,14 @@ export default function UserForm({ initialData, onSuccess, onCancel }: UserFormP
         if (!confirm(`Удалить сотрудника ${initialData.lastName} ${initialData.firstName}?`)) return
 
         setDeleting(true)
-        const res = await fetch(`/api/users/${initialData.id}`, { method: 'DELETE' })
+        const res = await fetch(`/api/users/${initialData.id}`, {method: 'DELETE'})
         const data = await res.json()
         setDeleting(false)
 
-        if (!res.ok) { setError(data.error); return }
+        if (!res.ok) {
+            setError(data.error);
+            return
+        }
 
         onSuccess()
     }
@@ -113,6 +125,63 @@ export default function UserForm({ initialData, onSuccess, onCancel }: UserFormP
         const file = e.target.files?.[0] ?? null
         setPhotoFile(file)
         setPhotoPreview(file ? URL.createObjectURL(file) : null)
+    }
+
+    function PasswordForm({ userId, onDone }: { userId: number; onDone: () => void }) {
+        const [password, setPassword] = useState('')
+        const [busy, setBusy] = useState(false)
+        const [error, setError] = useState<string | null>(null)
+        const [ok, setOk] = useState(false)
+
+        async function handleSubmit(e: React.FormEvent) {
+            e.preventDefault()
+            setBusy(true)
+            setError(null)
+            try {
+                const res = await fetch(`/api/users/${userId}/password`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password }),
+                })
+                const data = await res.json()
+                if (!res.ok) throw new Error(data.error ?? 'Ошибка сервера')
+                setOk(true)
+                setTimeout(onDone, 1200) // дать прочитать «Пароль изменён» и закрыть
+            } catch (err) {
+                setError((err as Error).message)
+            } finally {
+                setBusy(false)
+            }
+        }
+
+        return (
+            <form onSubmit={handleSubmit}>
+                <div className="modal-body">
+                    {error && <div className="alert alert-danger py-2">{error}</div>}
+                    {ok && <div className="alert alert-success py-2">Пароль изменён</div>}
+                    <label className="form-label">Новый пароль</label>
+                    <input
+                        type="text"
+                        className="form-control font-monospace"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        minLength={7}
+                        required
+                        autoFocus
+                        disabled={busy || ok}
+                    />
+                    <div className="form-text">Минимум 7 символов. Ввод открытый — видно, что печатаете.</div>
+                </div>
+                <div className="modal-footer">
+                    <button type="button" className="btn btn-secondary" onClick={onDone} disabled={busy}>
+                        Отмена
+                    </button>
+                    <button type="submit" className="btn btn-primary" disabled={busy || ok}>
+                        {busy ? 'Сохраняю...' : 'Сменить пароль'}
+                    </button>
+                </div>
+            </form>
+        )
     }
 
     if (adCredentials) {
@@ -126,7 +195,7 @@ export default function UserForm({ initialData, onSuccess, onCancel }: UserFormP
                         <p className="mb-2">
                             Временный пароль: <strong className="font-monospace">{adCredentials.tempPassword}</strong>
                         </p>
-                        <hr />
+                        <hr/>
                         <small className="mb-0">
                             Пароль показывается один раз и больше нигде не сохраняется — запишите его.
                             При первом входе сотрудник будет должен задать свой пароль.
@@ -141,118 +210,147 @@ export default function UserForm({ initialData, onSuccess, onCancel }: UserFormP
     }
 
     return (
-        <form onSubmit={handleSubmit}>
-            <div className="modal-body">
-                {error && <div className="alert alert-danger py-2">{error}</div>}
+        <>
+            <form onSubmit={handleSubmit}>
+                <div className="modal-body">
+                    {error && <div className="alert alert-danger py-2">{error}</div>}
 
-                <div className="mb-4">
-                    {photoPreview
-                        && <img src={photoPreview} alt="" width={'100%'}
-                                style={{ borderRadius: '10%', objectFit: 'cover' }} />
-                    }
-                </div>
+                    <div className="mb-4">
+                        {photoPreview
+                            && <img src={photoPreview} alt="" width={'100%'}
+                                    style={{borderRadius: '10%', objectFit: 'cover'}}/>
+                        }
+                    </div>
 
-                <div className="row g-3 mb-2">
-                    <div className="col-md-4">
-                        <label className="form-label">Фамилия *</label>
-                        <input name={'lastName'} type="text" className="form-control"
-                               defaultValue={(initialData?.['lastName'] as string | number | null) ?? ''} />
+                    <div className="row g-3 mb-2">
+                        <div className="col-md-4">
+                            <label className="form-label">Фамилия *</label>
+                            <input name={'lastName'} type="text" className="form-control"
+                                   defaultValue={(initialData?.['lastName'] as string | number | null) ?? ''}/>
+                        </div>
+                        <div className="col-md-4">
+                            <label className="form-label">Имя *</label>
+                            <input name={'firstName'} type="text" className="form-control"
+                                   defaultValue={(initialData?.['firstName'] as string | number | null) ?? ''}/>
+                        </div>
+                        <div className="col-md-4">
+                            <label className="form-label">Отчество</label>
+                            <input name={'middleName'} type="text" className="form-control"
+                                   defaultValue={(initialData?.['middleName'] as string | number | null) ?? ''}/>
+                        </div>
                     </div>
-                    <div className="col-md-4">
-                        <label className="form-label">Имя *</label>
-                        <input name={'firstName'} type="text" className="form-control"
-                               defaultValue={(initialData?.['firstName'] as string | number | null) ?? ''} />
-                    </div>
-                    <div className="col-md-4">
-                        <label className="form-label">Отчество</label>
-                        <input name={'middleName'} type="text" className="form-control"
-                               defaultValue={(initialData?.['middleName'] as string | number | null) ?? ''} />
-                    </div>
-                </div>
 
-                <div className="row g-3 mb-2">
-                    <div className="col-md-4">
-                        <label className="form-label">Отдел</label>
-                        <select name="departmentId" className="form-select" defaultValue={initialData?.departmentId ?? ''}>
-                        <option value="">—</option>
-                            {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                        </select>
+                    <div className="row g-3 mb-2">
+                        <div className="col-md-4">
+                            <label className="form-label">Отдел</label>
+                            <select name="departmentId" className="form-select"
+                                    defaultValue={initialData?.departmentId ?? ''}>
+                                <option value="">—</option>
+                                {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                            </select>
+                        </div>
+                        <div className="col-md-4">
+                            <label className="form-label">Должность</label>
+                            <select name="positionId" className="form-select"
+                                    defaultValue={initialData?.positionId ?? ''}>
+                                <option value="">—</option>
+                                {positions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                        </div>
+                        <div className="col-md-4">
+                            <label className="form-label">Рабочее место</label>
+                            <select name="workplaceId" className="form-select"
+                                    defaultValue={initialData?.workplaceId ?? ''}>
+                                <option value="">—</option>
+                                {workplaces.map(w => <option key={w.id} value={w.id}>{w.number}</option>)}
+                            </select>
+                        </div>
                     </div>
-                    <div className="col-md-4">
-                        <label className="form-label">Должность</label>
-                        <select name="positionId" className="form-select" defaultValue={initialData?.positionId ?? ''}>
-                            <option value="">—</option>
-                            {positions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
-                    </div>
-                    <div className="col-md-4">
-                        <label className="form-label">Рабочее место</label>
-                        <select name="workplaceId" className="form-select" defaultValue={initialData?.workplaceId ?? ''}>
-                            <option value="">—</option>
-                            {workplaces.map(w => <option key={w.id} value={w.id}>{w.number}</option>)}
-                        </select>
-                    </div>
-                </div>
 
-                <div className="row g-3 mb-2">
-                    <div className="col-md-4">
-                        <label className="form-label">Телефон</label>
-                        <input type="text" className="form-control" placeholder="+7 (___) ___-__-__"
-                               value={formatPhone(phoneDigits)} onChange={handlePhoneChange} />
-                        <input type="hidden" name="phone" value={phoneDigits} />
+                    <div className="row g-3 mb-2">
+                        <div className="col-md-4">
+                            <label className="form-label">Телефон</label>
+                            <input type="text" className="form-control" placeholder="+7 (___) ___-__-__"
+                                   value={formatPhone(phoneDigits)} onChange={handlePhoneChange}/>
+                            <input type="hidden" name="phone" value={phoneDigits}/>
+                        </div>
+                        <div className="col-md-4">
+                            <label className="form-label">Пропуск СКУД</label>
+                            <input name={'skudPass'} type="text" className="form-control"
+                                   defaultValue={(initialData?.['skudPass'] as string | number | null) ?? ''}/>
+                        </div>
+                        <div className="col-md-4">
+                            <label className="form-label">CRM ID</label>
+                            <input name={'crmId'} type="text" className="form-control"
+                                   defaultValue={(initialData?.['crmId'] as string | number | null) ?? ''}/>
+                        </div>
                     </div>
-                    <div className="col-md-4">
-                        <label className="form-label">Пропуск СКУД</label>
-                        <input name={'skudPass'} type="text" className="form-control"
-                               defaultValue={(initialData?.['skudPass'] as string | number | null) ?? ''} />
-                    </div>
-                    <div className="col-md-4">
-                        <label className="form-label">CRM ID</label>
-                        <input name={'crmId'} type="text" className="form-control"
-                               defaultValue={(initialData?.['crmId'] as string | number | null) ?? ''} />
-                    </div>
-                </div>
 
-                <div className="row g-3 mb-2">
-                    {initialData?.adLogin && (
-                        <div className="row g-3 mb-2">
-                            <div className="col-md-4">
-                                <label className="form-label">Логин AD</label>
-                                <input type="text" className="form-control font-monospace"
-                                       value={initialData.adLogin} disabled readOnly />
-                            </div>
+                    <div className="row g-3 mb-2">
+                        {initialData?.adLogin && (
+                            <>
+                                <div className="col-md-4">
+                                    <label className="form-label">Логин AD</label>
+                                    <input type="text" className="form-control font-monospace"
+                                           value={initialData.adLogin} disabled readOnly/>
+                                </div>
+                                <div className="col-md-4 d-flex align-items-end">
+                                    <button type="button" className="btn btn-outline-secondary p-2 w-full"
+                                            onClick={() => setPwdOpen(true)}>
+                                        Сменить пароль
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+
+                    <div className="mb-2">
+                        <label className="form-label">Комментарии</label>
+                        <textarea name="comments" className="form-control" rows={2}
+                                  defaultValue={initialData?.comments ?? ''}/>
+                    </div>
+
+                    <div className="mb-2">
+                        <label className="form-label">Фото</label>
+                        <input type="file" className="form-control" accept="image/jpeg,image/png,image/webp"
+                               onChange={handlePhotoChange}/>
+                    </div>
+
+                    <div className="form-check">
+                        <input name="isActive" type="checkbox" className="form-check-input" id="userIsActive"
+                               defaultChecked={initialData ? initialData.isActive : true}/>
+                        <label className="form-check-label" htmlFor="userIsActive">Активен</label>
+                    </div>
+
+                    {!initialData && (
+                        <div className="form-check form-switch mt-2">
+                            <input name="adUser" type="checkbox" className="form-check-input" id="userAdUser"
+                                   defaultChecked/>
+                            <label className="form-check-label" htmlFor="userAdUser">AD пользователь (создать учётную
+                                запись в домене)</label>
                         </div>
                     )}
                 </div>
-
-                <div className="mb-2">
-                    <label className="form-label">Комментарии</label>
-                    <textarea name="comments" className="form-control" rows={2} defaultValue={initialData?.comments ?? ''} />
-                </div>
-
-                <div className="mb-2">
-                    <label className="form-label">Фото</label>
-                        <input type="file" className="form-control" accept="image/jpeg,image/png,image/webp"
-                               onChange={handlePhotoChange} />
-                </div>
-
-                <div className="form-check">
-                    <input name="isActive" type="checkbox" className="form-check-input" id="userIsActive" defaultChecked={initialData ? initialData.isActive : true} />
-                    <label className="form-check-label" htmlFor="userIsActive">Активен</label>
-                </div>
-            </div>
-            <div className="modal-footer">
-                {initialData && (
-                    <button type="button" className="btn btn-outline-danger me-auto"
-                            onClick={handleDelete} disabled={deleting || loading}>
-                        <i className="bi bi-trash me-1"></i>{deleting ? 'Удаление...' : 'Удалить'}
+                <div className="modal-footer">
+                    {initialData && (
+                        <button type="button" className="btn btn-outline-danger me-auto"
+                                onClick={handleDelete} disabled={deleting || loading}>
+                            <i className="bi bi-trash me-1"></i>{deleting ? 'Удаление...' : 'Удалить'}
+                        </button>
+                    )}
+                    <button type="button" className="btn btn-secondary" onClick={onCancel}>Отмена</button>
+                    <button type="submit" className="btn btn-primary" disabled={loading}>
+                        {loading ? 'Сохранение...' : initialData ? 'Сохранить' : 'Создать'}
                     </button>
+                </div>
+            </form>
+
+            <Modal isOpen={pwdOpen} onClose={() => setPwdOpen(false)}
+                   title={`Смена пароля: ${initialData?.adLogin ?? ''}`}>
+                {initialData && (
+                    <PasswordForm userId={initialData.id} onDone={() => setPwdOpen(false)}/>
                 )}
-                <button type="button" className="btn btn-secondary" onClick={onCancel}>Отмена</button>
-                <button type="submit" className="btn btn-primary" disabled={loading}>
-                    {loading ? 'Сохранение...' : initialData ? 'Сохранить' : 'Создать'}
-                </button>
-            </div>
-        </form>
+            </Modal>
+        </>
     )
 }

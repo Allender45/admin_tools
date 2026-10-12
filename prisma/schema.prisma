@@ -68,19 +68,20 @@ model Workplace {
 }
 
 model User {
-  id         Int      @id @default(autoincrement())
-  lastName   String   @map("last_name") @db.VarChar(100)
-  firstName  String   @map("first_name") @db.VarChar(100)
-  middleName String?  @map("middle_name") @db.VarChar(100)
-  photo      String?
-  phone      String?  @db.VarChar(30)
-  isActive   Boolean  @default(true) @map("is_active")
-  skudPass   String?  @map("skud_pass") @db.VarChar(100)
-  comments   String?
-  crmId      Int?     @map("crm_id")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
-  adLogin    String?  @map("ad_login") @db.VarChar(100) // логин учётки в AD (после создания)
+  id           Int      @id @default(autoincrement())
+  lastName     String   @map("last_name") @db.VarChar(100)
+  firstName    String   @map("first_name") @db.VarChar(100)
+  middleName   String?  @map("middle_name") @db.VarChar(100)
+  photo        String?
+  phone        String?  @db.VarChar(30)
+  isActive     Boolean  @default(true) @map("is_active")
+  skudPass     String?  @map("skud_pass") @db.VarChar(100)
+  comments     String?
+  crmId        Int?     @map("crm_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  adLogin      String?  @map("ad_login") @db.VarChar(100) // логин учётки в AD (после создания)
+  skudPersonId Int?     @map("skud_person_id") // ID сотрудника в Орион Про (pList.ID)
 
   departmentId Int?        @map("department_id")
   department   Department? @relation(fields: [departmentId], references: [id])

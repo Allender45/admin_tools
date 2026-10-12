@@ -1,6 +1,7 @@
 import {NextRequest, NextResponse} from 'next/server'
 import prisma from '@/lib/db'
-import { createAdUser, AdError, AdUserResult } from '@/services/ad'
+import { createAdUser, AdError } from '@/services/ad'
+import { createSkudUser, SkudError } from '@/services/skud'
 
 export async function GET() {
     const users = await prisma.user.findMany({
@@ -40,24 +41,48 @@ export async function POST(req: NextRequest) {
             positionId ? prisma.position.findUnique({ where: { id: positionId } }) : null,
         ])
 
-        // === ШАГ 1: AD. Если ошибка — в базу НЕ пишем ===
-        let adResult: AdUserResult
-        // Для AD форматируем телефон: 10 цифр -> +7 (XXX) XXX-XX-XX
         const digits = phone?.replace(/\D/g, '') ?? null
         const adPhone = digits && digits.length === 10
             ? `+7 (${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 8)}-${digits.slice(8, 10)}`
             : phone
-        try {
-            adResult = await createAdUser({
-                lastName, firstName, middleName,
-                displayName, description, initials,
-                phone: adPhone, title: position?.name ?? null, department: department?.name ?? null,
-            })
-        } catch (e) {
-            if (e instanceof AdError) {
-                return NextResponse.json({ error: `Не удалось создать учётку в AD: ${e.message}` }, { status: 502 })
+
+        // === ШАГ 1: AD. Только если включён переключатель «AD пользователь».
+        // Если ошибка — в базу НЕ пишем ===
+        const adUser = body.adUser === 'on' || body.adUser === true
+        let adResult = null
+        if (adUser) {
+            try {
+                adResult = await createAdUser({
+                    lastName, firstName, middleName,
+                    displayName, description, initials,
+                    phone: adPhone, title: position?.name ?? null, department: department?.name ?? null,
+                })
+            } catch (e) {
+                if (e instanceof AdError) {
+                    return NextResponse.json({ error: `Не удалось создать учётку в AD: ${e.message}` }, { status: 502 })
+                }
+                throw e
             }
-            throw e
+        }
+
+        // === ШАГ 1.5: СКУД. Только если заполнено поле «Пропуск СКУД» ===
+        const skudPass = str(body.skudPass)
+        let skudResult = null
+        if (skudPass) {
+            try {
+                skudResult = await createSkudUser({
+                    lastName, firstName, middleName,
+                    cardCode: skudPass,
+                    phone,
+                    positionName: position?.name ?? null,
+                    departmentName: department?.name ?? null,
+                })
+            } catch (e) {
+                if (e instanceof SkudError) {
+                    return NextResponse.json({ error: `Не удалось создать сотрудника в СКУД: ${e.message}` }, { status: 502 })
+                }
+                throw e
+            }
         }
 
         // === ШАГ 2: AD создан — запись в базе ===
@@ -73,12 +98,13 @@ export async function POST(req: NextRequest) {
                 departmentId,
                 positionId,
                 workplaceId: num(body.workplaceId),
-                adLogin: adResult.login,
+                adLogin: adResult?.login ?? null,
+                skudPersonId: skudResult?.personId ?? null,
             },
         })
 
         // tempPassword возвращается один раз — показать в интерфейсе!
-        return NextResponse.json({ user, ad: adResult }, { status: 201 })
+        return NextResponse.json({ user, ad: adResult, skud: skudResult }, { status: 201 })
     } catch (error) {
         console.error('[POST /api/users]', error)
         return NextResponse.json({ error: 'Внутренняя ошибка сервера' }, { status: 500 })

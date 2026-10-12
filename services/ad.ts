@@ -72,10 +72,6 @@ export function generateTempPassword(length = 7): string {
 const psq = (s: string) => `'${s.replace(/'/g, "''")}'`
 
 // Скрипт, который выполнится НА КОНТРОЛЛЕРЕ ДОМЕНА.
-// Одна поездка: проверка занятости логина + создание учётки.
-// Скрипт, который выполнится НА КОНТРОЛЛЕРЕ ДОМЕНА.
-// Одна поездка: проверка занятости логина + создание учётки.
-// Скрипт, который выполнится НА КОНТРОЛЛЕРЕ ДОМЕНА.
 // Одна поездка: проверка занятости логина и CN + создание учётки.
 function buildRemoteScript(p: AdUserInput & { password: string }): string {
     const phoneArg = p.phone ? ` -OfficePhone ${psq(p.phone)}` : ''
@@ -129,14 +125,10 @@ Invoke-Command -ComputerName ${psq(AD_HOST)} -Credential $cred -ScriptBlock $rem
 `
 }
 
-// Точка входа: создать учётку в AD.
-export async function createAdUser(input: AdUserInput): Promise<AdUserResult> {
-    const tempPassword = generateTempPassword()
-    const remoteScript = buildRemoteScript({ ...input, password: tempPassword })
+// Общий раннер: собирает внешний скрипт, кодирует в base64 (UTF-16LE)
+// и выполняет на DC. Возвращает stdout.
+async function runAdScript(remoteScript: string): Promise<string> {
     const outerScript = buildOuterScript(remoteScript)
-
-    // ВЕСЬ внешний скрипт в base64 (UTF-16LE) — передача без потерь
-    // кавычек и кириллицы
     const encoded = Buffer.from(outerScript, 'utf16le').toString('base64')
 
     try {
@@ -145,12 +137,55 @@ export async function createAdUser(input: AdUserInput): Promise<AdUserResult> {
             ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
             { timeout: EXEC_TIMEOUT_MS, windowsHide: true },
         )
-        const login = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean).pop()
-        if (!login) throw new Error('пустой ответ от DC')
-        return { login, tempPassword }
+        return stdout
     } catch (e) {
         const stderr = (e as { stderr?: string }).stderr ?? ''
         const detail = stderr.split(/\r?\n/).map(l => l.trim()).filter(Boolean).slice(-6).join(' | ')
         throw new AdError(detail ? `AD: ${detail}` : 'AD: сбой подключения или таймаут')
     }
+}
+
+// Точка входа: создать учётку в AD.
+export async function createAdUser(input: AdUserInput): Promise<AdUserResult> {
+    const tempPassword = generateTempPassword()
+    const stdout = await runAdScript(buildRemoteScript({ ...input, password: tempPassword }))
+    const login = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean).pop()
+    if (!login) throw new AdError('AD: пустой ответ от DC')
+    return { login, tempPassword }
+}
+
+// Заблокировать / разблокировать учётку (деактивация сотрудника).
+// Идемпотентно: учётка не найдена — считаем успехом (важно для повторов).
+export async function setAdUserEnabled(login: string, enabled: boolean): Promise<void> {
+    await runAdScript(`
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+Import-Module ActiveDirectory
+$u = Get-ADUser -Filter "sAMAccountName -eq ${psq(login)}"
+if ($u) { ${enabled ? 'Enable-ADAccount' : 'Disable-ADAccount'} -Identity $u }
+`)
+}
+
+// Удалить учётку (удаление сотрудника). Идемпотентно.
+export async function deleteAdUser(login: string): Promise<void> {
+    await runAdScript(`
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+Import-Module ActiveDirectory
+$u = Get-ADUser -Filter "sAMAccountName -eq ${psq(login)}"
+if ($u) { Remove-ADUser -Identity $u -Confirm:$false }
+`)
+}
+
+// Сменить пароль учётки (сброс администратором).
+export async function resetAdPassword(login: string, newPassword: string): Promise<void> {
+    await runAdScript(`
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+Import-Module ActiveDirectory
+$u = Get-ADUser -Filter "sAMAccountName -eq ${psq(login)}"
+if (-not $u) { throw "Учётка ${login} не найдена" }
+$sec = ConvertTo-SecureString ${psq(newPassword)} -AsPlainText -Force
+Set-ADAccountPassword -Identity $u -Reset -NewPassword $sec
+`)
 }
