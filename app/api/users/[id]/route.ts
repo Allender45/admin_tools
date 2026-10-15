@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/db'
 import { setAdUserEnabled, deleteAdUser, AdError } from '@/services/ad'
+import { replaceSkudCard, createSkudUser, deleteSkudCards, SkudError } from '@/services/skud'
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     try {
@@ -40,6 +41,50 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
             }
         }
 
+        // === ШАГ 1.5: СКУД. Пропуск изменился — обновляем ключ в Орионе ===
+        const newSkudPass = str(body.skudPass)?.toUpperCase() ?? null
+        const oldSkudPass = existing.skudPass?.trim().toUpperCase() ?? null
+        let skudPersonId = existing.skudPersonId
+
+        if (newSkudPass !== oldSkudPass) {
+            try {
+                if (skudPersonId != null) {
+                    if (newSkudPass) {
+                        // Замена карты: replaceSkudCard удалит старые ключи
+                        // (ядро сотрёт их из контроллеров) и добавит новый
+                        await replaceSkudCard(skudPersonId, newSkudPass)
+                    } else {
+                        // Поле пропуска очистили — удаляем ключи из Ориона
+                        await deleteSkudCards(skudPersonId)
+                        skudPersonId = null
+                    }
+                } else if (newSkudPass) {
+                    // В Орионе сотрудника ещё нет (старая запись) — создаём
+                    const departmentId = num(body.departmentId)
+                    const positionId = num(body.positionId)
+                    const [department, position] = await Promise.all([
+                        departmentId ? prisma.department.findUnique({ where: { id: departmentId } }) : null,
+                        positionId ? prisma.position.findUnique({ where: { id: positionId } }) : null,
+                    ])
+                    const r = await createSkudUser({
+                        lastName: body.lastName.trim(),
+                        firstName: body.firstName.trim(),
+                        middleName: str(body.middleName),
+                        cardCode: newSkudPass,
+                        phone: str(body.phone),
+                        positionName: position?.name ?? null,
+                        departmentName: department?.name ?? null,
+                    })
+                    skudPersonId = r.personId
+                }
+            } catch (e) {
+                if (e instanceof SkudError) {
+                    return NextResponse.json({ error: `Не удалось обновить пропуск в СКУД: ${e.message}` }, { status: 502 })
+                }
+                throw e
+            }
+        }
+
         // === ШАГ 2: база ===
         const user = await prisma.user.update({
             where: { id: userId },
@@ -49,7 +94,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
                 middleName: str(body.middleName),
                 photo: str(body.photo),
                 phone: str(body.phone),
-                skudPass: str(body.skudPass),
+                skudPass: newSkudPass,
+                skudPersonId,
                 comments: str(body.comments),
                 crmId: num(body.crmId),
                 isActive,
@@ -87,6 +133,18 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
             } catch (e) {
                 if (e instanceof AdError) {
                     return NextResponse.json({ error: `Не удалось удалить учётку в AD: ${e.message}` }, { status: 502 })
+                }
+                throw e
+            }
+        }
+
+        // === ШАГ 1.5: СКУД. Удаляем ключи — ядро сотрёт их из контроллеров ===
+        if (existing.skudPersonId != null) {
+            try {
+                await deleteSkudCards(existing.skudPersonId)
+            } catch (e) {
+                if (e instanceof SkudError) {
+                    return NextResponse.json({ error: `Не удалось удалить ключи в СКУД: ${e.message}` }, { status: 502 })
                 }
                 throw e
             }
