@@ -92,6 +92,7 @@ export interface SkudUserResult {
     personId: number    // pList.ID
     keyId: number       // pMark.ID
     ownerName: string   // «Фамилия И. О.» — как отображается в Орионе
+    reassignedFrom?: string  // если карта была у другого сотрудника — его OwnerName
 }
 
 // «Фамилия И. О.» — формат OwnerName в Орионе
@@ -139,13 +140,21 @@ export async function createSkudUser(input: SkudUserInput): Promise<SkudUserResu
     await tx.begin()
 
     try {
-        // Карта уже кому-то выдана?
+        // Карта уже кому-то выдана? Если да — перевыдаём:
+        // отвязываем от прежнего владельца и привязываем к новому.
+        // Всё в одной транзакции: при сбое ниже откатится и это удаление.
+        let reassignedFrom: string | undefined
         const dup = await new sql.Request(tx).query(`
-            SELECT OwnerName FROM pMark
+            SELECT ID, Owner, OwnerName FROM pMark
             WHERE CONVERT(varbinary(64), CodeP) = 0x${packed}
         `)
         if (dup.recordset.length > 0) {
-            throw new SkudError(`СКУД: карта ${input.cardCode} уже выдана (${dup.recordset[0].OwnerName})`)
+            const old = dup.recordset[0] as { ID: number; Owner: number; OwnerName: string }
+            reassignedFrom = old.OwnerName
+            console.warn(`[SKUD] перевыдача карты ${input.cardCode}: была у «${old.OwnerName}» (pList ID=${old.Owner})`)
+            await new sql.Request(tx)
+                .input('kid', sql.Int, old.ID)
+                .query('DELETE FROM pMark WHERE ID = @kid')
         }
 
         // Справочники: должность / отдел / компания
@@ -221,7 +230,7 @@ export async function createSkudUser(input: SkudUserInput): Promise<SkudUserResu
         const keyId = key.recordset[0].id as number
 
         await tx.commit()
-        return { personId, keyId, ownerName }
+        return { personId, keyId, ownerName, reassignedFrom }
     } catch (e) {
         await tx.rollback().catch(() => {})
         if (e instanceof SkudError) throw e
