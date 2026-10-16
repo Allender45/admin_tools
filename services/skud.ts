@@ -25,6 +25,28 @@
 
 import os from 'os'
 import sql from 'mssql'
+import { readFile } from 'fs/promises'
+import path from 'path'
+
+export interface SkudUserInput {
+    lastName: string
+    firstName: string
+    middleName: string | null
+    cardCode: string            // 16 hex-символов, как показывает АБД/UProg
+    phone?: string | null
+    photoUrl?: string | null       // URL вида /uploads/xxx.jpg — прочитаем файл из public
+    positionName?: string | null   // должность — ищем/создаём в справочнике PPost
+    departmentName?: string | null // отдел — ищем/создаём в справочнике PDivision
+    companyName?: string | null    // компания — ищем/создаём в PCompany; если нет — SKUD_DEFAULT_COMPANY_ID
+    accessLevel?: number           // уровень доступа Ориона; по умолчанию SKUD_DEFAULT_ACCESS_LEVEL
+}
+
+export interface SkudUserResult {
+    personId: number    // pList.ID
+    keyId: number       // pMark.ID
+    ownerName: string   // «Фамилия И. О.» — как отображается в Орионе
+    reassignedFrom?: string  // если карта была у другого сотрудника — его OwnerName
+}
 
 // Собственный тип ошибки, чтобы в API отличать сбои СКУД от багов кода
 export class SkudError extends Error {}
@@ -76,25 +98,6 @@ export function packCardCode(cardHex: string): string {
     return out.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join('')
 }
 
-export interface SkudUserInput {
-    lastName: string
-    firstName: string
-    middleName: string | null
-    cardCode: string            // 16 hex-символов, как показывает АБД/UProg
-    phone?: string | null
-    positionName?: string | null   // должность — ищем/создаём в справочнике PPost
-    departmentName?: string | null // отдел — ищем/создаём в справочнике PDivision
-    companyName?: string | null    // компания — ищем/создаём в PCompany; если нет — SKUD_DEFAULT_COMPANY_ID
-    accessLevel?: number           // уровень доступа Ориона; по умолчанию SKUD_DEFAULT_ACCESS_LEVEL
-}
-
-export interface SkudUserResult {
-    personId: number    // pList.ID
-    keyId: number       // pMark.ID
-    ownerName: string   // «Фамилия И. О.» — как отображается в Орионе
-    reassignedFrom?: string  // если карта была у другого сотрудника — его OwnerName
-}
-
 // «Фамилия И. О.» — формат OwnerName в Орионе
 function buildOwnerName(lastName: string, firstName: string, middleName: string | null): string {
     let s = lastName.trim()
@@ -126,6 +129,20 @@ async function lookupOrCreateRef(
             SELECT @id AS id;
         `)
     return created.recordset[0].id as number
+}
+
+// Фото: URL вида /uploads/xxx.jpg -> байты файла из public/uploads.
+// Всё, что не из /uploads/, игнорируем — защита от путей вида ../../.
+// Файл не найден — не падаем, создаём сотрудника без фото.
+async function readPhotoBytes(photoUrl: string | null | undefined): Promise<Buffer | null> {
+    if (!photoUrl || !photoUrl.startsWith('/uploads/')) return null
+    const name = path.posix.basename(photoUrl)
+    try {
+        return await readFile(path.join(process.cwd(), 'public', 'uploads', name))
+    } catch {
+        console.warn(`[SKUD] фото ${photoUrl} не найдено на диске — создаём без фото`)
+        return null
+    }
 }
 
 // Создать сотрудника и привязать карту доступа.
@@ -170,36 +187,41 @@ export async function createSkudUser(input: SkudUserInput): Promise<SkudUserResu
         finish.setHours(23, 59, 59, 0)
 
         const workstation = os.hostname()
-        const noDate = new Date('1899-12-30T00:00:00') // «пустая» дата в Орионе
 
-        // Карточка сотрудника (pList). Набор полей скопирован со строк,
-        // которые создаёт АБД (проверено на ID=340..344).
+        // Фото читаем с диска ДО транзакционной вставки.
+        const photo = await readPhotoBytes(input.photoUrl)
+
+        // Карточка сотрудника (pList).
+        // Даты BirthDate/DateDocument/DateDocumentEnd пишем как NULL, а не
+        // «нулевую» дату Delphi 1899-12-30: ядро считает её недопустимой
+        // и не выгружает сотрудника в контроллеры.
+        // Picture — сырые байты JPEG (проверено по строкам, созданным АБД).
         const person = await new sql.Request(tx)
             .input('ln', sql.NVarChar(50), input.lastName.trim())
             .input('fn', sql.NVarChar(50), input.firstName.trim())
             .input('mn', sql.NVarChar(50), (input.middleName ?? '').trim())
             .input('phone', sql.NVarChar(50), (input.phone ?? '').trim())
+            .input('pic', sql.VarBinary(sql.MAX), photo)
             .input('company', sql.Int, companyId)
             .input('section', sql.Int, sectionId)
             .input('post', sql.Int, postId)
-            .input('noDate', sql.DateTime, noDate)
             .input('ws', sql.NVarChar(50), workstation)
             .query(`
                 DECLARE @id INT;
                 SELECT @id = ISNULL(MAX(ID), 0) + 1 FROM pList;
                 INSERT INTO pList (
-                    ID, Name, FirstName, MidName, Status, WorkPhone, HomePhone, BirthDate, Address,
+                    ID, Name, FirstName, MidName, Status, WorkPhone, HomePhone, Picture, BirthDate, Address,
                     Company, Section, Post, Schedule, Spack, TabNumber, GrStatus, ChangeTime, IndexForContactId,
                     status_list, EmailList, INN, ReasonToBlackList, TypeDocum, SexGuest, DokumSeries, DokumNumber,
                     DateDocument, KodPodr, Kem, DateDocumentEnd, birthplace, ROOMID, OperatorID, Workstation,
                     AlcoholCheck, IDGROUPEXIT
                 ) VALUES (
-                    @id, @ln, @fn, @mn, 6, @phone, '', @noDate, '',
-                    @company, @section, @post, 0, 128, '', 0, GETDATE(), 0,
-                    0, '', '', '', 0, 0, '', '',
-                    @noDate, '', '', @noDate, '', 0, 1, @ws,
-                    0, 0
-                );
+                             @id, @ln, @fn, @mn, 6, @phone, '', @pic, NULL, '',
+                             @company, @section, @post, 0, 128, '', 0, GETDATE(), 0,
+                             0, '', '', '', 0, 0, '', '',
+                             NULL, '', '', NULL, '', 0, 1, @ws,
+                             0, 0
+                         );
                 SELECT @id AS id;
             `)
         const personId = person.recordset[0].id as number

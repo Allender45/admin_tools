@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
                     lastName, firstName, middleName,
                     cardCode: skudPass,
                     phone,
+                    photoUrl: str(body.photo),
                     positionName: position?.name ?? null,
                     departmentName: department?.name ?? null,
                 })
