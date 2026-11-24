@@ -1,7 +1,8 @@
 import {NextRequest, NextResponse} from 'next/server'
 import prisma from '@/lib/db'
 import { createAdUser, AdError } from '@/services/ad'
-import { createSkudUser, SkudError } from '@/services/skud'
+import { createSkudUser, findSkudPersonByCard, SkudError, SkudConflictError } from '@/services/skud'
+import { deactivatePreviousSkudOwner } from '@/services/users'
 
 export async function GET() {
     const users = await prisma.user.findMany({
@@ -46,6 +47,33 @@ export async function POST(req: NextRequest) {
             ? `+7 (${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 8)}-${digits.slice(8, 10)}`
             : phone
 
+        // === ШАГ 0: СКУД. Если пропуск указан — проверяем, не занят ли он,
+        // ДО создания учётки в AD (иначе повторный сабмит после подтверждения
+        // упрётся в уже созданный логин). Занят — 409, фронт спросит
+        // подтверждение и повторит запрос с reassignSkud: true ===
+        const skudPass = str(body.skudPass)
+        const reassignSkud = body.reassignSkud === true || body.reassignSkud === 'on'
+        if (skudPass && !reassignSkud) {
+            try {
+                const owner = await findSkudPersonByCard(skudPass)
+                if (owner) {
+                    return NextResponse.json(
+                        {
+                            error: `Пропуск уже закреплён за ${owner.ownerName}`,
+                            conflict: 'skud_card',
+                            ownerName: owner.ownerName,
+                        },
+                        { status: 409 },
+                    )
+                }
+            } catch (e) {
+                if (e instanceof SkudError) {
+                    return NextResponse.json({ error: `Не удалось проверить пропуск в СКУД: ${e.message}` }, { status: 502 })
+                }
+                throw e
+            }
+        }
+
         // === ШАГ 1: AD. Только если включён переключатель «AD пользователь».
         // Если ошибка — в базу НЕ пишем ===
         const adUser = body.adUser === 'on' || body.adUser === true
@@ -66,7 +94,6 @@ export async function POST(req: NextRequest) {
         }
 
         // === ШАГ 1.5: СКУД. Только если заполнено поле «Пропуск СКУД» ===
-        const skudPass = str(body.skudPass)
         let skudResult = null
         if (skudPass) {
             try {
@@ -77,8 +104,15 @@ export async function POST(req: NextRequest) {
                     photoUrl: str(body.photo),
                     positionName: position?.name ?? null,
                     departmentName: department?.name ?? null,
-                })
+                }, { allowReassign: reassignSkud })
             } catch (e) {
+                if (e instanceof SkudConflictError) {
+                    // Гонка: карту успели выдать между пре-проверкой и записью
+                    return NextResponse.json(
+                        { error: e.message, conflict: 'skud_card', ownerName: e.ownerName },
+                        { status: 409 },
+                    )
+                }
                 if (e instanceof SkudError) {
                     return NextResponse.json({ error: `Не удалось создать сотрудника в СКУД: ${e.message}` }, { status: 502 })
                 }
@@ -104,8 +138,14 @@ export async function POST(req: NextRequest) {
             },
         })
 
+        // === ШАГ 3: подтверждённая перевыдача — деактивируем прежнего владельца ===
+        let deactivated = null
+        if (skudPass && reassignSkud) {
+            deactivated = await deactivatePreviousSkudOwner(skudPass, user.id)
+        }
+
         // tempPassword возвращается один раз — показать в интерфейсе!
-        return NextResponse.json({ user, ad: adResult, skud: skudResult }, { status: 201 })
+        return NextResponse.json({ user, ad: adResult, skud: skudResult, deactivated }, { status: 201 })
     } catch (error) {
         console.error('[POST /api/users]', error)
         return NextResponse.json({ error: 'Внутренняя ошибка сервера' }, { status: 500 })

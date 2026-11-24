@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/db'
 import { setAdUserEnabled, deleteAdUser, AdError } from '@/services/ad'
-import { replaceSkudCard, createSkudUser, deleteSkudCards, SkudError } from '@/services/skud'
+import { replaceSkudCard, createSkudUser, deleteSkudCards, findSkudPersonByCard, SkudError, SkudConflictError } from '@/services/skud'
+import { deactivatePreviousSkudOwner } from '@/services/users'
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     try {
@@ -28,6 +29,34 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
         const isActive = body.isActive === 'on' || body.isActive === true
 
+        // === ШАГ 0: СКУД. Пропуск меняется на чужой — проверяем ДО шага AD.
+        // Занят кем-то другим — 409, фронт спросит подтверждение
+        // и повторит запрос с reassignSkud: true ===
+        const newSkudPass = str(body.skudPass)?.toUpperCase() ?? null
+        const oldSkudPass = existing.skudPass?.trim().toUpperCase() ?? null
+        const reassignSkud = body.reassignSkud === true || body.reassignSkud === 'on'
+
+        if (newSkudPass && newSkudPass !== oldSkudPass && !reassignSkud) {
+            try {
+                const owner = await findSkudPersonByCard(newSkudPass)
+                if (owner && owner.personId !== existing.skudPersonId) {
+                    return NextResponse.json(
+                        {
+                            error: `Пропуск уже закреплён за ${owner.ownerName}`,
+                            conflict: 'skud_card',
+                            ownerName: owner.ownerName,
+                        },
+                        { status: 409 },
+                    )
+                }
+            } catch (e) {
+                if (e instanceof SkudError) {
+                    return NextResponse.json({ error: `Не удалось проверить пропуск в СКУД: ${e.message}` }, { status: 502 })
+                }
+                throw e
+            }
+        }
+
         // === ШАГ 1: AD. Статус изменился — блокируем/разблокируем учётку.
         // Сбой AD = базу не трогаем, форма покажет текст ошибки ===
         if (existing.adLogin && existing.isActive !== isActive) {
@@ -42,8 +71,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         }
 
         // === ШАГ 1.5: СКУД. Пропуск изменился — обновляем ключ в Орионе ===
-        const newSkudPass = str(body.skudPass)?.toUpperCase() ?? null
-        const oldSkudPass = existing.skudPass?.trim().toUpperCase() ?? null
         let skudPersonId = existing.skudPersonId
 
         if (newSkudPass !== oldSkudPass) {
@@ -52,7 +79,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
                     if (newSkudPass) {
                         // Замена карты: replaceSkudCard удалит старые ключи
                         // (ядро сотрёт их из контроллеров) и добавит новый
-                        await replaceSkudCard(skudPersonId, newSkudPass)
+                        await replaceSkudCard(skudPersonId, newSkudPass, { allowReassign: reassignSkud })
                     } else {
                         // Поле пропуска очистили — удаляем ключи из Ориона
                         await deleteSkudCards(skudPersonId)
@@ -74,10 +101,17 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
                         phone: str(body.phone),
                         positionName: position?.name ?? null,
                         departmentName: department?.name ?? null,
-                    })
+                    }, { allowReassign: reassignSkud })
                     skudPersonId = r.personId
                 }
             } catch (e) {
+                if (e instanceof SkudConflictError) {
+                    // Гонка: карту успели выдать между пре-проверкой и записью
+                    return NextResponse.json(
+                        { error: e.message, conflict: 'skud_card', ownerName: e.ownerName },
+                        { status: 409 },
+                    )
+                }
                 if (e instanceof SkudError) {
                     return NextResponse.json({ error: `Не удалось обновить пропуск в СКУД: ${e.message}` }, { status: 502 })
                 }
@@ -105,7 +139,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
             },
         })
 
-        return NextResponse.json({ user })
+        // === ШАГ 3: подтверждённая перевыдача — деактивируем прежнего владельца ===
+        let deactivated = null
+        if (newSkudPass && newSkudPass !== oldSkudPass && reassignSkud) {
+            deactivated = await deactivatePreviousSkudOwner(newSkudPass, userId)
+        }
+
+        return NextResponse.json({ user, deactivated })
     } catch (error) {
         console.error('[PUT /api/users/:id]', error)
         return NextResponse.json({ error: 'Внутренняя ошибка сервера' }, { status: 500 })

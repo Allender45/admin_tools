@@ -178,7 +178,9 @@ if ($u) { Remove-ADUser -Identity $u -Confirm:$false }
 }
 
 // Сменить пароль учётки (сброс администратором).
-export async function resetAdPassword(login: string, newPassword: string): Promise<void> {
+// mustChange = true — при первом входе сотрудник обязан задать свой пароль
+// (используем для автоматически выданных временных паролей).
+export async function resetAdPassword(login: string, newPassword: string, mustChange = false): Promise<void> {
     await runAdScript(`
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -187,5 +189,6 @@ $u = Get-ADUser -Filter "sAMAccountName -eq ${psq(login)}"
 if (-not $u) { throw "Учётка ${login} не найдена" }
 $sec = ConvertTo-SecureString ${psq(newPassword)} -AsPlainText -Force
 Set-ADAccountPassword -Identity $u -Reset -NewPassword $sec
+${mustChange ? 'Set-ADUser -Identity $u -ChangePasswordAtLogon $true' : ''}
 `)
 }

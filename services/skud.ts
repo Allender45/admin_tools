@@ -51,6 +51,20 @@ export interface SkudUserResult {
 // Собственный тип ошибки, чтобы в API отличать сбои СКУД от багов кода
 export class SkudError extends Error {}
 
+// Карта уже закреплена за другим сотрудником. API возвращает 409,
+// фронт показывает подтверждение перевыдачи и повторяет запрос
+// с allowReassign/reassignSkud.
+export class SkudConflictError extends SkudError {
+    personId: number    // pList.ID текущего владельца карты
+    ownerName: string   // «Фамилия И. О.» текущего владельца
+
+    constructor(cardCode: string, personId: number, ownerName: string) {
+        super(`СКУД: карта ${cardCode} уже выдана (${ownerName})`)
+        this.personId = personId
+        this.ownerName = ownerName
+    }
+}
+
 const config: sql.config = {
     server: process.env.SKUD_SQL_SERVER ?? 'SRVORION',
     database: process.env.SKUD_SQL_DB ?? 'bolid',
@@ -147,7 +161,10 @@ async function readPhotoBytes(photoUrl: string | null | undefined): Promise<Buff
 
 // Создать сотрудника и привязать карту доступа.
 // Две вставки в одной транзакции: pList + pMark.
-export async function createSkudUser(input: SkudUserInput): Promise<SkudUserResult> {
+// Если карта уже кому-то выдана:
+//   opts.allowReassign не задан — бросаем SkudConflictError (фронт спросит подтверждение);
+//   opts.allowReassign = true — перевыдаём: отвязываем от прежнего владельца.
+export async function createSkudUser(input: SkudUserInput, opts?: { allowReassign?: boolean }): Promise<SkudUserResult> {
     const packed = packCardCode(input.cardCode)
     const ownerName = buildOwnerName(input.lastName, input.firstName, input.middleName ?? null)
     const accessLevel = input.accessLevel ?? DEFAULT_ACCESS_LEVEL
@@ -157,9 +174,10 @@ export async function createSkudUser(input: SkudUserInput): Promise<SkudUserResu
     await tx.begin()
 
     try {
-        // Карта уже кому-то выдана? Если да — перевыдаём:
-        // отвязываем от прежнего владельца и привязываем к новому.
-        // Всё в одной транзакции: при сбое ниже откатится и это удаление.
+        // Карта уже кому-то выдана? Без явного подтверждения — конфликт.
+        // С подтверждением — перевыдаём: отвязываем от прежнего владельца
+        // и привязываем к новому. Всё в одной транзакции: при сбое ниже
+        // откатится и это удаление.
         let reassignedFrom: string | undefined
         const dup = await new sql.Request(tx).query(`
             SELECT ID, Owner, OwnerName FROM pMark
@@ -167,6 +185,9 @@ export async function createSkudUser(input: SkudUserInput): Promise<SkudUserResu
         `)
         if (dup.recordset.length > 0) {
             const old = dup.recordset[0] as { ID: number; Owner: number; OwnerName: string }
+            if (!opts?.allowReassign) {
+                throw new SkudConflictError(input.cardCode, old.Owner, old.OwnerName)
+            }
             reassignedFrom = old.OwnerName
             console.warn(`[SKUD] перевыдача карты ${input.cardCode}: была у «${old.OwnerName}» (pList ID=${old.Owner})`)
             await new sql.Request(tx)
@@ -263,7 +284,7 @@ export async function createSkudUser(input: SkudUserInput): Promise<SkudUserResu
 // Заменить карту сотруднику: старые ключи удаляются (ядро сотрёт их
 // из контроллеров), новая карта добавляется с тем же уровнем доступа,
 // что был у первого из старых ключей (иначе — уровень по умолчанию).
-export async function replaceSkudCard(personId: number, newCardCode: string): Promise<SkudUserResult> {
+export async function replaceSkudCard(personId: number, newCardCode: string, opts?: { allowReassign?: boolean }): Promise<SkudUserResult> {
     const packed = packCardCode(newCardCode)
     const pool = await getPool()
     const tx = new sql.Transaction(pool)
@@ -271,10 +292,21 @@ export async function replaceSkudCard(personId: number, newCardCode: string): Pr
 
     try {
         const dup = await new sql.Request(tx).query(`
-            SELECT OwnerName FROM pMark WHERE CONVERT(varbinary(64), CodeP) = 0x${packed}
+            SELECT ID, Owner, OwnerName FROM pMark WHERE CONVERT(varbinary(64), CodeP) = 0x${packed}
         `)
         if (dup.recordset.length > 0) {
-            throw new SkudError(`СКУД: карта ${newCardCode} уже выдана (${dup.recordset[0].OwnerName})`)
+            const old = dup.recordset[0] as { ID: number; Owner: number; OwnerName: string }
+            // Карта числится за ДРУГИМ сотрудником: без подтверждения — конфликт,
+            // с подтверждением — отвязываем от прежнего владельца
+            if (old.Owner !== personId) {
+                if (!opts?.allowReassign) {
+                    throw new SkudConflictError(newCardCode, old.Owner, old.OwnerName)
+                }
+                console.warn(`[SKUD] перевыдача карты ${newCardCode}: была у «${old.OwnerName}» (pList ID=${old.Owner})`)
+                await new sql.Request(tx)
+                    .input('kid', sql.Int, old.ID)
+                    .query('DELETE FROM pMark WHERE ID = @kid')
+            }
         }
 
         const person = await new sql.Request(tx)

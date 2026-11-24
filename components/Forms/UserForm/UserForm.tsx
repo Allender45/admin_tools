@@ -25,7 +25,9 @@ export default function UserForm({initialData, onSuccess, onCancel}: UserFormPro
     )
     const [deleting, setDeleting] = useState(false)
     const [adCredentials, setAdCredentials] = useState<{ login: string; tempPassword: string } | null>(null)
-    const [pwdOpen, setPwdOpen] = useState(false)
+    const [tempPwd, setTempPwd] = useState<{ loading: boolean; password: string | null; error: string | null } | null>(null)
+    const [skudConflict, setSkudConflict] = useState<{ ownerName: string } | null>(null)
+    const [pendingBody, setPendingBody] = useState<Record<string, unknown> | null>(null)
 
     useEffect(() => {
         Promise.all([fetchDepartments(), fetchPositions(), fetchWorkplaces()]).finally(() => setDictsLoading(false))
@@ -48,6 +50,40 @@ export default function UserForm({initialData, onSuccess, onCancel}: UserFormPro
 
     function handlePhoneChange(e: React.ChangeEvent<HTMLInputElement>) {
         setPhoneDigits(e.target.value.replace(/\D/g, '').replace(/^[78]/, '').slice(0, 10))
+    }
+
+    async function submitBody(body: Record<string, unknown>) {
+        const res = initialData
+            ? await fetch(`/api/users/${initialData.id}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body),
+            })
+            : await fetch('/api/users', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body),
+            })
+        return {res, data: await res.json()}
+    }
+
+    function handleResult(res: Response, data: { error?: string; conflict?: string; ownerName?: string; ad?: { login: string; tempPassword: string } | null }): boolean {
+        // true = запрос полностью обработан (успех или показан конфликт)
+        if (res.status === 409 && data.conflict === 'skud_card') {
+            return false
+        }
+        if (!res.ok) {
+            setError(data.error ?? 'Ошибка сервера')
+            return true
+        }
+        // Создание: если вернулись данные AD — показываем пароль один раз,
+        // модалку пока НЕ закрываем
+        if (!initialData && data.ad) {
+            setAdCredentials(data.ad)
+            return true
+        }
+        onSuccess()
+        return true
     }
 
     async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -74,34 +110,58 @@ export default function UserForm({initialData, onSuccess, onCancel}: UserFormPro
         const form = new FormData(formEl)
         const body = {...Object.fromEntries(form.entries()), photo}
 
-        const res = initialData
-            ? await fetch(`/api/users/${initialData.id}`, {
-                method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(body),
-            })
-            : await fetch('/api/users', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(body),
-            })
-
-        const data = await res.json()
+        const {res, data} = await submitBody(body)
         setLoading(false)
 
-        if (!res.ok) {
-            setError(data.error);
+        if (res.status === 409 && data.conflict === 'skud_card') {
+            // Пропуск числится за другим — спрашиваем подтверждение перевыдачи
+            setPendingBody(body)
+            setSkudConflict({ownerName: data.ownerName})
             return
         }
 
-        // Создание: если вернулись данные AD — показываем пароль один раз,
-        // модалку пока НЕ закрываем
-        if (!initialData && data.ad) {
-            setAdCredentials(data.ad)
-            return
-        }
+        handleResult(res, data)
+    }
 
-        onSuccess()
+    async function handleConfirmReassign() {
+        if (!pendingBody) return
+        setLoading(true)
+        setError(null)
+
+        const confirmBody = {...pendingBody, reassignSkud: true}
+        const {res, data} = await submitBody(confirmBody)
+        setLoading(false)
+
+        setSkudConflict(null)
+        setPendingBody(null)
+        const done = handleResult(res, data)
+        if (!done) {
+            // Гонка: карту успели перевыдать ещё раз — спрашиваем снова
+            setPendingBody(confirmBody)
+            setSkudConflict({ownerName: data.ownerName})
+        }
+    }
+
+    function handleCancelReassign() {
+        setSkudConflict(null)
+        setPendingBody(null)
+    }
+
+    async function handleTempPassword() {
+        if (!initialData) return
+        setTempPwd({loading: true, password: null, error: null})
+        try {
+            const res = await fetch(`/api/users/${initialData.id}/password`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({}), // без пароля — сервер сгенерирует временный
+            })
+            const data = await res.json()
+            if (!res.ok) throw new Error(data.error ?? 'Ошибка сервера')
+            setTempPwd({loading: false, password: data.tempPassword, error: null})
+        } catch (e) {
+            setTempPwd({loading: false, password: null, error: (e as Error).message})
+        }
     }
 
     async function handleDelete() {
@@ -125,63 +185,6 @@ export default function UserForm({initialData, onSuccess, onCancel}: UserFormPro
         const file = e.target.files?.[0] ?? null
         setPhotoFile(file)
         setPhotoPreview(file ? URL.createObjectURL(file) : null)
-    }
-
-    function PasswordForm({ userId, onDone }: { userId: number; onDone: () => void }) {
-        const [password, setPassword] = useState('')
-        const [busy, setBusy] = useState(false)
-        const [error, setError] = useState<string | null>(null)
-        const [ok, setOk] = useState(false)
-
-        async function handleSubmit(e: React.FormEvent) {
-            e.preventDefault()
-            setBusy(true)
-            setError(null)
-            try {
-                const res = await fetch(`/api/users/${userId}/password`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password }),
-                })
-                const data = await res.json()
-                if (!res.ok) throw new Error(data.error ?? 'Ошибка сервера')
-                setOk(true)
-                setTimeout(onDone, 1200) // дать прочитать «Пароль изменён» и закрыть
-            } catch (err) {
-                setError((err as Error).message)
-            } finally {
-                setBusy(false)
-            }
-        }
-
-        return (
-            <form onSubmit={handleSubmit}>
-                <div className="modal-body">
-                    {error && <div className="alert alert-danger py-2">{error}</div>}
-                    {ok && <div className="alert alert-success py-2">Пароль изменён</div>}
-                    <label className="form-label">Новый пароль</label>
-                    <input
-                        type="text"
-                        className="form-control font-monospace"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        minLength={7}
-                        required
-                        autoFocus
-                        disabled={busy || ok}
-                    />
-                    <div className="form-text">Минимум 7 символов. Ввод открытый — видно, что печатаете.</div>
-                </div>
-                <div className="modal-footer">
-                    <button type="button" className="btn btn-secondary" onClick={onDone} disabled={busy}>
-                        Отмена
-                    </button>
-                    <button type="submit" className="btn btn-primary" disabled={busy || ok}>
-                        {busy ? 'Сохраняю...' : 'Сменить пароль'}
-                    </button>
-                </div>
-            </form>
-        )
     }
 
     if (adCredentials) {
@@ -296,7 +299,7 @@ export default function UserForm({initialData, onSuccess, onCancel}: UserFormPro
                                 </div>
                                 <div className="col-md-4 d-flex align-items-end">
                                     <button type="button" className="btn btn-outline-secondary p-2 w-full"
-                                            onClick={() => setPwdOpen(true)}>
+                                            onClick={handleTempPassword}>
                                         Сменить пароль
                                     </button>
                                 </div>
@@ -345,11 +348,54 @@ export default function UserForm({initialData, onSuccess, onCancel}: UserFormPro
                 </div>
             </form>
 
-            <Modal isOpen={pwdOpen} onClose={() => setPwdOpen(false)}
-                   title={`Смена пароля: ${initialData?.adLogin ?? ''}`}>
-                {initialData && (
-                    <PasswordForm userId={initialData.id} onDone={() => setPwdOpen(false)}/>
-                )}
+            <Modal isOpen={skudConflict !== null} onClose={handleCancelReassign}
+                   title="Пропуск занят">
+                <div className="modal-body">
+                    <p>Данный пропуск закреплён за <strong>{skudConflict?.ownerName}</strong>.</p>
+                    <p className="mb-0">Перевести его в неактивный статус?</p>
+                </div>
+                <div className="modal-footer">
+                    <button type="button" className="btn btn-secondary" onClick={handleCancelReassign}
+                            disabled={loading}>
+                        Отмена
+                    </button>
+                    <button type="button" className="btn btn-primary" onClick={handleConfirmReassign}
+                            disabled={loading}>
+                        {loading ? 'Сохранение...' : 'Да, перевыдать'}
+                    </button>
+                </div>
+            </Modal>
+
+            <Modal isOpen={tempPwd !== null} onClose={() => setTempPwd(null)}
+                   title={`Смена пароля AD: ${initialData?.adLogin ?? ''}`}>
+                <div className="modal-body">
+                    {tempPwd?.loading && (
+                        <div className="text-center py-4">
+                            <div className="spinner-border text-primary" role="status">
+                                <span className="visually-hidden">Загрузка...</span>
+                            </div>
+                        </div>
+                    )}
+                    {tempPwd?.error && <div className="alert alert-danger py-2 mb-0">{tempPwd.error}</div>}
+                    {tempPwd?.password && (
+                        <div className="alert alert-success mb-0">
+                            <p className="mb-1">
+                                Временный пароль: <strong className="font-monospace">{tempPwd.password}</strong>
+                            </p>
+                            <hr/>
+                            <small className="mb-0">
+                                Пароль показывается один раз и больше нигде не сохраняется — запишите его.
+                                При первом входе сотрудник будет должен задать свой пароль.
+                            </small>
+                        </div>
+                    )}
+                </div>
+                <div className="modal-footer">
+                    <button type="button" className="btn btn-primary" onClick={() => setTempPwd(null)}
+                            disabled={tempPwd?.loading}>
+                        Готово
+                    </button>
+                </div>
             </Modal>
         </>
     )
